@@ -51,14 +51,6 @@ impl LogicItem {
         egui::pos2(x, self.pos.y + self.size.y * t)
     }
 
-    pub fn clamp_to(&mut self, canvas: Rect) {
-        if canvas.contains_rect(self.rect()) {
-            return;
-        }
-        self.pos.x = self.pos.x.clamp(canvas.min.x, canvas.max.x - self.size.x);
-        self.pos.y = self.pos.y.clamp(canvas.min.y, canvas.max.y - self.size.y);
-    }
-
     pub fn toggle(&mut self) {
         self.on = !self.on;
     }

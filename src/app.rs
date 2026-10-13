@@ -1,5 +1,6 @@
 use eframe::egui;
 
+use crate::camera::Camera;
 use crate::consts::{LOGIC_ON_COLOR, PORT_RADIUS, WIRE_OFF_COLOR, WIRE_ON_COLOR};
 use crate::logic_item::{GateKind, ItemKind, LogicItem};
 use crate::network::Network;
@@ -11,6 +12,7 @@ pub struct MyApp {
     next_id: u64,
     connections: Vec<Connection>,
     pending: Option<PortId>,
+    camera: Camera,
 }
 
 impl Default for MyApp {
@@ -20,6 +22,7 @@ impl Default for MyApp {
             next_id: 0,
             connections: Vec::new(),
             pending: None,
+            camera: Camera::default(),
         };
         let blue = egui::Color32::from_rgb(120, 170, 255);
         let purple = egui::Color32::from_rgb(160, 130, 255);
@@ -84,11 +87,12 @@ struct PortInteraction {
 }
 
 impl PortInteraction {
-    fn gather(ui: &mut egui::Ui, ports: &[PortGeom]) -> Self {
+    fn gather(ui: &mut egui::Ui, ports: &[PortGeom], camera: Camera) -> Self {
         let mut out = Self::default();
         for p in ports {
+            let screen_rect = camera.world_rect_to_screen(p.rect);
             let r = ui.interact(
-                p.rect,
+                screen_rect,
                 ui.id().with(("port", p.id.item_id, p.id.kind)),
                 egui::Sense::click_and_drag(),
             );
@@ -111,20 +115,34 @@ impl eframe::App for MyApp {
         let painter = ui.painter().clone();
         let canvas = ui.max_rect();
 
+        let scroll = ctx.input(|i| i.smooth_scroll_delta.y);
+        if scroll != 0.0 {
+            if let Some(cursor) = ctx.input(|i| i.pointer.hover_pos()) {
+                self.camera.zoom_at(cursor, (scroll * 0.0015).exp());
+            }
+        }
+
+        let bg = ui.interact(canvas, egui::Id::new("canvas_bg"), egui::Sense::drag());
+        if bg.dragged() {
+            self.camera.pan += bg.drag_delta();
+            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        }
+        let camera = self.camera;
+
         let ports = ports::collect(&self.items);
-        let box_responses = self.interact_boxes(ui, canvas);
-        let port_interaction = PortInteraction::gather(ui, &ports);
+        let box_responses = self.interact_boxes(ui, camera);
+        let port_interaction = PortInteraction::gather(ui, &ports, camera);
 
         self.toggle_boxes_on_click(&port_interaction, &box_responses);
         self.update_pending_wire(&ctx, &port_interaction);
-        self.delete_wire_on_right_click(&ctx, &ports);
+        self.delete_wire_on_right_click(&ctx, &ports, camera);
 
         let network = Network::evaluate(&self.items, &self.connections);
 
-        self.draw_wires(&painter, &ports, &network);
-        self.draw_pending_wire(&painter, &ctx, &ports);
-        self.draw_boxes(&painter, &ctx, &box_responses, &network);
-        self.draw_ports(&painter, &ctx, &port_interaction, &ports);
+        self.draw_wires(&painter, &ports, &network, camera);
+        self.draw_pending_wire(&painter, &ctx, &ports, camera);
+        self.draw_boxes(&painter, &ctx, &box_responses, &network, camera);
+        self.draw_ports(&painter, &ctx, &port_interaction, &ports, camera);
 
         self.draw_fps(&ctx);
     }
@@ -141,19 +159,19 @@ impl MyApp {
             }
         }
     }
-
-    fn interact_boxes(&mut self, ui: &mut egui::Ui, canvas: egui::Rect) -> Vec<egui::Response> {
+    fn interact_boxes(&mut self, ui: &mut egui::Ui, camera: Camera) -> Vec<egui::Response> {
         let mut responses = Vec::with_capacity(self.items.len());
         for item in &mut self.items {
+            let screen_rect = camera.world_rect_to_screen(item.rect());
             let response = ui.interact(
-                item.rect(),
+                screen_rect,
                 ui.id().with(item.id),
                 egui::Sense::click_and_drag(),
             );
+
             if response.dragged() {
-                item.pos += response.drag_delta();
+                item.pos += response.drag_delta() / camera.zoom;
             }
-            item.clamp_to(canvas);
             responses.push(response);
         }
         responses
@@ -183,8 +201,12 @@ impl MyApp {
             self.connections.push(conn);
         }
     }
-
-    fn delete_wire_on_right_click(&mut self, ctx: &egui::Context, ports: &[PortGeom]) {
+    fn delete_wire_on_right_click(
+        &mut self,
+        ctx: &egui::Context,
+        ports: &[PortGeom],
+        camera: Camera,
+    ) {
         if !ctx.input(|i| i.pointer.secondary_clicked()) {
             return;
         }
@@ -192,7 +214,8 @@ impl MyApp {
             return;
         };
 
-        if self.items.iter().any(|it| it.rect().contains(mouse)) {
+        let mouse_world = camera.screen_to_world(mouse);
+        if self.items.iter().any(|it| it.rect().contains(mouse_world)) {
             return;
         }
 
@@ -203,16 +226,27 @@ impl MyApp {
             ) else {
                 return false;
             };
-            wire::hit(a, b, mouse, 6.0)
+            wire::hit(
+                camera.world_to_screen(a),
+                camera.world_to_screen(b),
+                mouse,
+                6.0,
+            )
         });
         if let Some(i) = hit {
             self.connections.remove(i);
         }
     }
 }
-
 impl MyApp {
-    fn draw_wires(&self, painter: &egui::Painter, ports: &[PortGeom], network: &Network) {
+    fn draw_wires(
+        &self,
+        painter: &egui::Painter,
+        ports: &[PortGeom],
+        network: &Network,
+        camera: Camera,
+    ) {
+        let width = (2.5 * camera.zoom).max(1.0);
         for conn in &self.connections {
             let (Some(a), Some(b)) = (
                 ports::center_of(ports, conn.from),
@@ -225,17 +259,28 @@ impl MyApp {
                 PortKind::Output(idx) => network.output(conn.from.item_id, idx),
                 PortKind::Input(_) => false,
             };
-
             let color = if powered {
                 WIRE_ON_COLOR
             } else {
                 WIRE_OFF_COLOR
             };
-            wire::draw(painter, a, b, color);
+            wire::draw(
+                painter,
+                camera.world_to_screen(a),
+                camera.world_to_screen(b),
+                color,
+                width,
+            );
         }
     }
 
-    fn draw_pending_wire(&self, painter: &egui::Painter, ctx: &egui::Context, ports: &[PortGeom]) {
+    fn draw_pending_wire(
+        &self,
+        painter: &egui::Painter,
+        ctx: &egui::Context,
+        ports: &[PortGeom],
+        camera: Camera,
+    ) {
         let Some(src) = self.pending else { return };
         let Some(a) = ports::center_of(ports, src) else {
             return;
@@ -243,7 +288,14 @@ impl MyApp {
         let Some(mouse) = ctx.input(|i| i.pointer.hover_pos()) else {
             return;
         };
-        wire::draw(painter, a, mouse, egui::Color32::from_gray(140));
+        let width = (2.5 * camera.zoom).max(1.0);
+        wire::draw(
+            painter,
+            camera.world_to_screen(a),
+            mouse,
+            egui::Color32::from_gray(140),
+            width,
+        );
     }
 
     fn draw_boxes(
@@ -252,18 +304,19 @@ impl MyApp {
         ctx: &egui::Context,
         responses: &[egui::Response],
         network: &Network,
+        camera: Camera,
     ) {
         for (item, response) in self.items.iter().zip(responses) {
-            let rect = item.rect();
-            let (fill, stroke) = box_style(item, response, network);
+            let rect = camera.world_rect_to_screen(item.rect());
+            let (fill, stroke) = box_style(item, response, network, camera.zoom);
 
-            painter.rect_filled(rect, 6.0, fill);
-            painter.rect_stroke(rect, 6.0, stroke, egui::StrokeKind::Inside);
+            painter.rect_filled(rect, 6.0 * camera.zoom, fill);
+            painter.rect_stroke(rect, 6.0 * camera.zoom, stroke, egui::StrokeKind::Inside);
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 &item.label,
-                egui::FontId::proportional(20.0),
+                egui::FontId::proportional(20.0 * camera.zoom),
                 egui::Color32::BLACK,
             );
 
@@ -281,8 +334,12 @@ impl MyApp {
         ctx: &egui::Context,
         interaction: &PortInteraction,
         ports: &[PortGeom],
+        camera: Camera,
     ) {
+        let radius = PORT_RADIUS * camera.zoom;
+        let stroke = egui::Stroke::new((1.5 * camera.zoom).max(0.5), egui::Color32::from_gray(40));
         for p in ports {
+            let center = camera.world_to_screen(p.center);
             let is_hover = interaction.hovered == Some(p.id);
             let is_pending = self.pending == Some(p.id);
 
@@ -295,12 +352,8 @@ impl MyApp {
                 base
             };
 
-            painter.circle_filled(p.center, PORT_RADIUS, fill);
-            painter.circle_stroke(
-                p.center,
-                PORT_RADIUS,
-                egui::Stroke::new(1.5, egui::Color32::from_gray(40)),
-            );
+            painter.circle_filled(center, radius, fill);
+            painter.circle_stroke(center, radius, stroke);
 
             if is_hover {
                 ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
@@ -324,31 +377,33 @@ impl MyApp {
             });
     }
 }
-
 fn box_style(
     item: &LogicItem,
     response: &egui::Response,
     network: &Network,
+    zoom: f32,
 ) -> (egui::Color32, egui::Stroke) {
     let lit = match item.kind {
         ItemKind::Source => item.on,
         ItemKind::Led => network.input(item.id, 0),
         ItemKind::Gate(_) => false,
     };
-
     let base = if lit { LOGIC_ON_COLOR } else { item.color };
 
     if response.dragged() {
         (
             base.gamma_multiply(1.25),
-            egui::Stroke::new(2.0, egui::Color32::WHITE),
+            egui::Stroke::new(2.0 * zoom, egui::Color32::WHITE),
         )
     } else if response.hovered() {
         (
             base.gamma_multiply(1.1),
-            egui::Stroke::new(1.5, egui::Color32::from_gray(220)),
+            egui::Stroke::new(1.5 * zoom, egui::Color32::from_gray(220)),
         )
     } else {
-        (base, egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+        (
+            base,
+            egui::Stroke::new(1.0 * zoom, egui::Color32::from_gray(60)),
+        )
     }
 }

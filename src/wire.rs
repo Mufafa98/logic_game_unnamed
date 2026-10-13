@@ -55,14 +55,13 @@ impl Bezier {
 fn horizontal_offset(a: Pos2, b: Pos2) -> f32 {
     (b.x - a.x).abs().max(MIN_CURVE_OFFSET) * 0.5
 }
-
-pub fn draw(painter: &Painter, a: Pos2, b: Pos2, color: Color32) {
+pub fn draw(painter: &Painter, a: Pos2, b: Pos2, color: Color32, width: f32) {
     let curve = Bezier::wire(a, b);
     painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
         curve.control_points(),
         false,
         Color32::TRANSPARENT,
-        Stroke::new(2.5, color),
+        Stroke::new(width, color),
     ));
 }
 
