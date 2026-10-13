@@ -1,6 +1,7 @@
 mod app;
 mod consts;
 mod logic_item;
+mod network;
 mod ports;
 mod wire;
 

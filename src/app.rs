@@ -1,8 +1,9 @@
 use eframe::egui;
 
-use crate::consts::PORT_RADIUS;
-use crate::logic_item::LogicItem;
-use crate::ports::{self, Connection, PortGeom, PortId};
+use crate::consts::{LOGIC_ON_COLOR, PORT_RADIUS, WIRE_OFF_COLOR, WIRE_ON_COLOR};
+use crate::logic_item::{GateKind, ItemKind, LogicItem};
+use crate::network::Network;
+use crate::ports::{self, Connection, PortGeom, PortId, PortKind};
 use crate::wire;
 
 pub struct MyApp {
@@ -20,30 +21,19 @@ impl Default for MyApp {
             connections: Vec::new(),
             pending: None,
         };
-        app.add_box(
-            egui::pos2(60.0, 60.0),
-            "A",
-            egui::Color32::from_rgb(120, 170, 255),
-            1,
-            2,
-            true,
-        );
-        app.add_box(
-            egui::pos2(240.0, 140.0),
-            "B",
-            egui::Color32::from_rgb(255, 170, 120),
-            2,
-            1,
-            true,
-        );
-        app.add_box(
-            egui::pos2(120.0, 280.0),
-            "C",
-            egui::Color32::from_rgb(170, 255, 150),
-            1,
-            1,
-            false,
-        );
+        let blue = egui::Color32::from_rgb(120, 170, 255);
+        let purple = egui::Color32::from_rgb(160, 130, 255);
+        let green = egui::Color32::from_rgb(120, 220, 140);
+        let nand_type = ItemKind::Gate(GateKind::Nand);
+
+        let a = app.add_box(egui::pos2(60.0, 80.0), "I1", blue, 0, 1, ItemKind::Source);
+        let b = app.add_box(egui::pos2(60.0, 240.0), "I2", blue, 0, 1, ItemKind::Source);
+        let g = app.add_box(egui::pos2(280.0, 160.0), "NAND", purple, 2, 1, nand_type);
+        let l = app.add_box(egui::pos2(500.0, 160.0), "O", green, 1, 0, ItemKind::Led);
+
+        app.connect(a, 0, g, 0);
+        app.connect(b, 0, g, 1);
+        app.connect(g, 0, l, 0);
         app
     }
 }
@@ -56,23 +46,37 @@ impl MyApp {
         color: egui::Color32,
         no_in: u8,
         no_out: u8,
-        clickable: bool,
-    ) {
+        kind: ItemKind,
+    ) -> u64 {
+        let id = self.next_id;
         self.items.push(LogicItem {
-            id: self.next_id,
+            id,
             pos,
             size: egui::vec2(90.0, 60.0),
             label: label.to_owned(),
             color,
             no_in,
             no_out,
-            clickable,
             on: false,
+            kind,
         });
         self.next_id += 1;
+        id
+    }
+
+    fn connect(&mut self, src_id: u64, src_out: u8, dst_id: u64, dst_in: u8) {
+        self.connections.push(Connection {
+            from: PortId {
+                item_id: src_id,
+                kind: PortKind::Output(src_out),
+            },
+            to: PortId {
+                item_id: dst_id,
+                kind: PortKind::Input(dst_in),
+            },
+        });
     }
 }
-
 #[derive(Default)]
 struct PortInteraction {
     hovered: Option<PortId>,
@@ -115,9 +119,11 @@ impl eframe::App for MyApp {
         self.update_pending_wire(&ctx, &port_interaction);
         self.delete_wire_on_right_click(&ctx, &ports);
 
-        self.draw_wires(&painter, &ports);
+        let network = Network::evaluate(&self.items, &self.connections);
+
+        self.draw_wires(&painter, &ports, &network);
         self.draw_pending_wire(&painter, &ctx, &ports);
-        self.draw_boxes(&painter, &ctx, &box_responses);
+        self.draw_boxes(&painter, &ctx, &box_responses, &network);
         self.draw_ports(&painter, &ctx, &port_interaction, &ports);
 
         self.draw_fps(&ctx);
@@ -130,7 +136,7 @@ impl MyApp {
             return;
         }
         for (item, response) in self.items.iter_mut().zip(responses) {
-            if response.clicked() && item.clickable {
+            if response.clicked() && item.is_source() {
                 item.toggle();
             }
         }
@@ -206,14 +212,26 @@ impl MyApp {
 }
 
 impl MyApp {
-    fn draw_wires(&self, painter: &egui::Painter, ports: &[PortGeom]) {
+    fn draw_wires(&self, painter: &egui::Painter, ports: &[PortGeom], network: &Network) {
         for conn in &self.connections {
-            if let (Some(a), Some(b)) = (
+            let (Some(a), Some(b)) = (
                 ports::center_of(ports, conn.from),
                 ports::center_of(ports, conn.to),
-            ) {
-                wire::draw(painter, a, b, egui::Color32::from_gray(210));
-            }
+            ) else {
+                continue;
+            };
+
+            let powered = match conn.from.kind {
+                PortKind::Output(idx) => network.output(conn.from.item_id, idx),
+                PortKind::Input(_) => false,
+            };
+
+            let color = if powered {
+                WIRE_ON_COLOR
+            } else {
+                WIRE_OFF_COLOR
+            };
+            wire::draw(painter, a, b, color);
         }
     }
 
@@ -233,10 +251,11 @@ impl MyApp {
         painter: &egui::Painter,
         ctx: &egui::Context,
         responses: &[egui::Response],
+        network: &Network,
     ) {
         for (item, response) in self.items.iter().zip(responses) {
             let rect = item.rect();
-            let (fill, stroke) = box_style(item, response);
+            let (fill, stroke) = box_style(item, response, network);
 
             painter.rect_filled(rect, 6.0, fill);
             painter.rect_stroke(rect, 6.0, stroke, egui::StrokeKind::Inside);
@@ -306,12 +325,18 @@ impl MyApp {
     }
 }
 
-fn box_style(item: &LogicItem, response: &egui::Response) -> (egui::Color32, egui::Stroke) {
-    let base = if item.on {
-        item.color.gamma_multiply(1.35)
-    } else {
-        item.color
+fn box_style(
+    item: &LogicItem,
+    response: &egui::Response,
+    network: &Network,
+) -> (egui::Color32, egui::Stroke) {
+    let lit = match item.kind {
+        ItemKind::Source => item.on,
+        ItemKind::Led => network.input(item.id, 0),
+        ItemKind::Gate(_) => false,
     };
+
+    let base = if lit { LOGIC_ON_COLOR } else { item.color };
 
     if response.dragged() {
         (
