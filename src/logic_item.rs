@@ -10,6 +10,9 @@ pub struct LogicItem {
     pub color: Color32,
     pub no_in: u8,
     pub no_out: u8,
+
+    pub clickable: bool,
+    pub on: bool,
 }
 
 impl LogicItem {
@@ -33,5 +36,9 @@ impl LogicItem {
         }
         self.pos.x = self.pos.x.clamp(canvas.min.x, canvas.max.x - self.size.x);
         self.pos.y = self.pos.y.clamp(canvas.min.y, canvas.max.y - self.size.y);
+    }
+
+    pub fn toggle(&mut self) {
+        self.on = !self.on;
     }
 }

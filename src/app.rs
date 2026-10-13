@@ -26,6 +26,7 @@ impl Default for MyApp {
             egui::Color32::from_rgb(120, 170, 255),
             1,
             2,
+            true,
         );
         app.add_box(
             egui::pos2(240.0, 140.0),
@@ -33,6 +34,7 @@ impl Default for MyApp {
             egui::Color32::from_rgb(255, 170, 120),
             2,
             1,
+            true,
         );
         app.add_box(
             egui::pos2(120.0, 280.0),
@@ -40,6 +42,7 @@ impl Default for MyApp {
             egui::Color32::from_rgb(170, 255, 150),
             1,
             1,
+            false,
         );
         app
     }
@@ -53,6 +56,7 @@ impl MyApp {
         color: egui::Color32,
         no_in: u8,
         no_out: u8,
+        clickable: bool,
     ) {
         self.items.push(LogicItem {
             id: self.next_id,
@@ -62,6 +66,8 @@ impl MyApp {
             color,
             no_in,
             no_out,
+            clickable,
+            on: false,
         });
         self.next_id += 1;
     }
@@ -105,6 +111,7 @@ impl eframe::App for MyApp {
         let box_responses = self.interact_boxes(ui, canvas);
         let port_interaction = PortInteraction::gather(ui, &ports);
 
+        self.toggle_boxes_on_click(&port_interaction, &box_responses);
         self.update_pending_wire(&ctx, &port_interaction);
         self.delete_wire_on_right_click(&ctx, &ports);
 
@@ -118,6 +125,17 @@ impl eframe::App for MyApp {
 }
 
 impl MyApp {
+    fn toggle_boxes_on_click(&mut self, port: &PortInteraction, responses: &[egui::Response]) {
+        if port.hovered.is_some() {
+            return;
+        }
+        for (item, response) in self.items.iter_mut().zip(responses) {
+            if response.clicked() && item.clickable {
+                item.toggle();
+            }
+        }
+    }
+
     fn interact_boxes(&mut self, ui: &mut egui::Ui, canvas: egui::Rect) -> Vec<egui::Response> {
         let mut responses = Vec::with_capacity(self.items.len());
         for item in &mut self.items {
@@ -289,20 +307,23 @@ impl MyApp {
 }
 
 fn box_style(item: &LogicItem, response: &egui::Response) -> (egui::Color32, egui::Stroke) {
+    let base = if item.on {
+        item.color.gamma_multiply(1.35)
+    } else {
+        item.color
+    };
+
     if response.dragged() {
         (
-            item.color.gamma_multiply(1.25),
+            base.gamma_multiply(1.25),
             egui::Stroke::new(2.0, egui::Color32::WHITE),
         )
     } else if response.hovered() {
         (
-            item.color.gamma_multiply(1.1),
+            base.gamma_multiply(1.1),
             egui::Stroke::new(1.5, egui::Color32::from_gray(220)),
         )
     } else {
-        (
-            item.color,
-            egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
-        )
+        (base, egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
     }
 }
