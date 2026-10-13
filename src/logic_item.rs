@@ -7,6 +7,7 @@ pub enum GateKind {
     Nand,
 }
 
+#[derive(Clone, Copy)]
 pub enum ItemKind {
     Source,
     Led,
