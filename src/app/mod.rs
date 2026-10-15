@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use eframe::{App, Frame};
 use egui::*;
 
@@ -9,31 +11,77 @@ use crate::ports::{self, Connection, PortGeom, PortId, PortKind};
 mod draw;
 mod logic;
 
+#[derive(Clone)]
+pub struct Graph {
+    pub items: Vec<LogicItem>,
+    pub connections: Vec<Connection>,
+}
+
+#[derive(Clone)]
+pub struct CompoundDef {
+    pub no_in: u8,
+    pub no_out: u8,
+    pub input_sources: Vec<u64>,
+    pub output_leds: Vec<u64>,
+    pub graph: Graph,
+}
+
 pub struct MyApp {
-    items: Vec<LogicItem>,
+    graph: Graph,
+    compound_defs: HashMap<u64, CompoundDef>,
+    compound_name: String,
+
     next_id: u64,
-    connections: Vec<Connection>,
     pending: Option<PortId>,
     camera: Camera,
+    palette_entries: Vec<PaletteEntry>,
     palette_drag: Option<PaletteEntry>,
     selected: Option<u64>,
 }
 
 impl Default for MyApp {
     fn default() -> Self {
-        let mut app = Self {
-            items: Vec::new(),
-            next_id: 0,
-            connections: Vec::new(),
-            pending: None,
-            camera: Camera::default(),
-            palette_drag: None,
-            selected: None,
-        };
         let blue = Color32::from_rgb(120, 170, 255);
         let purple = Color32::from_rgb(160, 130, 255);
         let green = Color32::from_rgb(120, 220, 140);
         let nand_type = ItemKind::Gate(GateKind::Nand);
+        let mut app = Self {
+            graph: Graph {
+                items: Vec::new(),
+                connections: Vec::new(),
+            },
+            compound_defs: HashMap::new(),
+            compound_name: "Placeholder".to_string(),
+
+            next_id: 0,
+            pending: None,
+            camera: Camera::default(),
+            palette_entries: vec![
+                PaletteEntry {
+                    kind: ItemKind::Source,
+                    label: "Source".to_string(),
+                    color: blue,
+                    no_in: 0,
+                    no_out: 1,
+                },
+                PaletteEntry {
+                    kind: ItemKind::Led,
+                    label: "LED".to_string(),
+                    color: green,
+                    no_in: 1,
+                    no_out: 0,
+                },
+                PaletteEntry {
+                    kind: ItemKind::Gate(GateKind::Nand),
+                    label: "NAND".to_string(),
+                    color: purple,
+                    no_in: 2,
+                    no_out: 1,
+                },
+            ],
+            palette_drag: None,
+            selected: None,
+        };
 
         let a = app.add_box(pos2(60.0, 80.0), "I1", blue, 0, 1, ItemKind::Source);
         let b = app.add_box(pos2(60.0, 240.0), "I2", blue, 0, 1, ItemKind::Source);
@@ -58,7 +106,7 @@ impl MyApp {
         kind: ItemKind,
     ) -> u64 {
         let id = self.next_id;
-        self.items.push(LogicItem {
+        self.graph.items.push(LogicItem {
             id,
             pos,
             size: vec2(90.0, 60.0),
@@ -74,7 +122,7 @@ impl MyApp {
     }
 
     fn connect(&mut self, src_id: u64, src_out: u8, dst_id: u64, dst_in: u8) {
-        self.connections.push(Connection {
+        self.graph.connections.push(Connection {
             from: PortId {
                 item_id: src_id,
                 kind: PortKind::Output(src_out),
@@ -113,42 +161,16 @@ impl PortInteraction {
         out
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct PaletteEntry {
     kind: ItemKind,
-    label: &'static str,
+    label: String,
     color: Color32,
     no_in: u8,
     no_out: u8,
 }
 
 impl PaletteEntry {
-    fn all() -> [Self; 3] {
-        [
-            Self {
-                kind: ItemKind::Source,
-                label: "Source",
-                color: Color32::from_rgb(120, 170, 255),
-                no_in: 0,
-                no_out: 1,
-            },
-            Self {
-                kind: ItemKind::Led,
-                label: "LED",
-                color: Color32::from_rgb(120, 220, 140),
-                no_in: 1,
-                no_out: 0,
-            },
-            Self {
-                kind: ItemKind::Gate(GateKind::Nand),
-                label: "NAND",
-                color: Color32::from_rgb(160, 130, 255),
-                no_in: 2,
-                no_out: 1,
-            },
-        ]
-    }
-
     fn draw(&self, ui: &mut Ui) -> Response {
         let (rect, response) =
             ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::drag());
@@ -175,7 +197,7 @@ impl PaletteEntry {
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
-            self.label,
+            self.label.clone(),
             FontId::proportional(14.0),
             Color32::BLACK,
         );
@@ -213,11 +235,62 @@ impl App for MyApp {
             .show(&ctx, |ui| {
                 ui.set_max_width(palette_w - 12.0);
 
-                for entry in PaletteEntry::all() {
+                for entry in self.palette_entries.iter() {
                     if entry.draw(ui).drag_started() {
-                        started_drag = Some(entry);
+                        started_drag = Some(entry.clone());
                     }
                     ui.add_space(6.0);
+                }
+
+                ui.label(RichText::new("New component name").strong());
+                ui.text_edit_singleline(&mut self.compound_name);
+
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                if ui.button("SAVE").clicked() {
+                    let def_id = self.next_id;
+                    self.next_id += 1;
+                    let name = if self.compound_name.trim().is_empty() {
+                        format!("Compound {}", def_id)
+                    } else {
+                        self.compound_name.trim().to_owned()
+                    };
+                    self.compound_name.clear();
+                    let input_sources: Vec<u64> = self
+                        .graph
+                        .items
+                        .iter()
+                        .filter(|it| matches!(it.kind, ItemKind::Source))
+                        .map(|it| it.id)
+                        .collect();
+                    let output_leds: Vec<u64> = self
+                        .graph
+                        .items
+                        .iter()
+                        .filter(|it| matches!(it.kind, ItemKind::Led))
+                        .map(|it| it.id)
+                        .collect();
+
+                    let def = CompoundDef {
+                        no_in: input_sources.len() as u8,
+                        no_out: output_leds.len() as u8,
+                        input_sources,
+                        output_leds,
+                        graph: self.graph.clone(),
+                    };
+                    let no_in = def.no_in;
+                    let no_out = def.no_out;
+                    self.compound_defs.insert(def_id, def);
+
+                    self.palette_entries.push(PaletteEntry {
+                        kind: ItemKind::Compound(def_id),
+                        label: name,
+                        color: Color32::from_rgb(123, 223, 255),
+                        no_in,
+                        no_out,
+                    });
                 }
 
                 ui.add_space(8.0);
@@ -229,7 +302,7 @@ impl App for MyApp {
 
                 match self
                     .selected
-                    .and_then(|id| self.items.iter_mut().find(|it| it.id == id))
+                    .and_then(|id| self.graph.items.iter_mut().find(|it| it.id == id))
                 {
                     Some(item) => {
                         ui.label("Label");
@@ -264,7 +337,7 @@ impl App for MyApp {
             ctx.set_cursor_icon(CursorIcon::Grabbing);
         }
 
-        let ports = ports::collect(&self.items);
+        let ports = ports::collect(&self.graph.items);
         let box_responses = self.interact_boxes(ui, camera);
         let port_interaction = PortInteraction::gather(ui, &ports, camera);
 
@@ -273,7 +346,7 @@ impl App for MyApp {
         self.delete_wire_on_right_click(&ctx, &ports, camera);
         self.handle_box_deletion(&box_responses, palette_rect, &ctx);
 
-        let network = Network::evaluate(&self.items, &self.connections);
+        let network = Network::evaluate(&self.graph, &self.compound_defs, &HashMap::new());
 
         self.draw_wires(&painter, &ports, &network, camera);
         self.draw_pending_wire(&painter, &ctx, &ports, camera);
@@ -289,7 +362,7 @@ impl App for MyApp {
                     let pos = world - size * 0.5;
                     self.add_box(
                         pos,
-                        entry.label,
+                        &entry.label,
                         entry.color,
                         entry.no_in,
                         entry.no_out,

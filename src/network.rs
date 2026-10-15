@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use crate::{
+    app::{CompoundDef, Graph},
     consts::NETWORK_MAX_ITER,
-    logic_item::LogicItem,
-    ports::{Connection, PortKind},
+    logic_item::{ItemKind, LogicItem},
+    ports::PortKind,
 };
 
 pub struct Network {
@@ -12,7 +13,13 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn evaluate(items: &[LogicItem], connections: &[Connection]) -> Self {
+    pub fn evaluate(
+        graph: &Graph,
+        defs: &HashMap<u64, CompoundDef>,
+        source_overrides: &HashMap<u64, bool>,
+    ) -> Self {
+        let items = &graph.items;
+        let connections = &graph.connections;
         let idx_by_id: HashMap<u64, usize> = items
             .iter()
             .enumerate()
@@ -51,8 +58,7 @@ impl Network {
                         })
                     })
                     .collect();
-
-                let new = item.eval(&inputs);
+                let new = eval_item(item, &inputs, defs, source_overrides);
                 if new != outputs[idx] {
                     outputs[idx] = new;
                     changed = true;
@@ -96,6 +102,41 @@ impl Network {
     pub fn input(&self, item_id: u64, idx: u8) -> bool {
         self.inputs.get(&(item_id, idx)).copied().unwrap_or(false)
     }
+}
+fn eval_item(
+    item: &LogicItem,
+    inputs: &[bool],
+    defs: &HashMap<u64, CompoundDef>,
+    overrides: &HashMap<u64, bool>,
+) -> Vec<bool> {
+    match item.kind {
+        ItemKind::Source => {
+            vec![overrides.get(&item.id).copied().unwrap_or(item.on)]
+        }
+        ItemKind::Led => Vec::new(),
+        ItemKind::Gate(g) => g.eval(inputs),
+        ItemKind::Compound(def_id) => match defs.get(&def_id) {
+            Some(def) => eval_compound(def, inputs, defs),
+            None => vec![false; item.no_out as usize],
+        },
+    }
+}
+fn eval_compound(
+    def: &CompoundDef,
+    inputs: &[bool],
+    defs: &HashMap<u64, CompoundDef>,
+) -> Vec<bool> {
+    let mut overrides = HashMap::new();
+    for (i, &src_id) in def.input_sources.iter().enumerate() {
+        overrides.insert(src_id, inputs.get(i).copied().unwrap_or(false));
+    }
+
+    let net = Network::evaluate(&def.graph, defs, &overrides);
+
+    def.output_leds
+        .iter()
+        .map(|&led_id| net.input(led_id, 0))
+        .collect()
 }
 fn output_value(by_id: &HashMap<u64, usize>, outputs: &[Vec<bool>], id: u64, idx: u8) -> bool {
     by_id

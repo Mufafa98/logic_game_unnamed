@@ -15,6 +15,7 @@ impl MyApp {
         }
 
         let id = self
+            .graph
             .items
             .iter()
             .zip(responses)
@@ -23,8 +24,9 @@ impl MyApp {
 
         let Some(id) = id else { return };
 
-        self.items.retain(|it| it.id != id);
-        self.connections
+        self.graph.items.retain(|it| it.id != id);
+        self.graph
+            .connections
             .retain(|c| c.from.item_id != id && c.to.item_id != id);
     }
 
@@ -32,7 +34,7 @@ impl MyApp {
         if port.hovered.is_some() {
             return;
         }
-        for (item, response) in self.items.iter_mut().zip(responses) {
+        for (item, response) in self.graph.items.iter_mut().zip(responses) {
             if !response.clicked() {
                 continue;
             }
@@ -44,8 +46,8 @@ impl MyApp {
     }
 
     pub fn interact_boxes(&mut self, ui: &mut Ui, camera: Camera) -> Vec<Response> {
-        let mut responses = Vec::with_capacity(self.items.len());
-        for item in &mut self.items {
+        let mut responses = Vec::with_capacity(self.graph.items.len());
+        for item in &mut self.graph.items {
             let screen_rect = camera.world_rect_to_screen(item.rect());
             let response = ui.interact(screen_rect, ui.id().with(item.id), Sense::click_and_drag());
 
@@ -74,11 +76,12 @@ impl MyApp {
         };
 
         let duplicate = self
+            .graph
             .connections
             .iter()
             .any(|c| c.from == conn.from && c.to == conn.to);
         if !duplicate {
-            self.connections.push(conn);
+            self.graph.connections.push(conn);
         }
     }
 
@@ -96,11 +99,16 @@ impl MyApp {
         };
 
         let mouse_world = camera.screen_to_world(mouse);
-        if self.items.iter().any(|it| it.rect().contains(mouse_world)) {
+        if self
+            .graph
+            .items
+            .iter()
+            .any(|it| it.rect().contains(mouse_world))
+        {
             return;
         }
 
-        let hit = self.connections.iter().position(|c| {
+        let hit = self.graph.connections.iter().position(|c| {
             let (Some(a), Some(b)) = (
                 ports::center_of(ports, c.from),
                 ports::center_of(ports, c.to),
@@ -115,7 +123,7 @@ impl MyApp {
             )
         });
         if let Some(i) = hit {
-            self.connections.remove(i);
+            self.graph.connections.remove(i);
         }
     }
 }

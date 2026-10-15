@@ -17,7 +17,7 @@ impl MyApp {
         camera: Camera,
     ) {
         let width = (2.5 * camera.zoom).max(1.0);
-        for conn in &self.connections {
+        for conn in &self.graph.connections {
             let (Some(a), Some(b)) = (
                 ports::center_of(ports, conn.from),
                 ports::center_of(ports, conn.to),
@@ -76,7 +76,7 @@ impl MyApp {
         network: &Network,
         camera: Camera,
     ) {
-        for (item, response) in self.items.iter().zip(responses) {
+        for (item, response) in self.graph.items.iter().zip(responses) {
             let rect = camera.world_rect_to_screen(item.rect());
             let (fill, stroke) = box_style(item, response, network, camera.zoom);
 
@@ -164,7 +164,7 @@ impl MyApp {
     }
 
     pub fn draw_palette_ghost(&self, painter: &Painter, ctx: &Context, camera: Camera) {
-        let Some(entry) = self.palette_drag else {
+        let Some(entry) = self.palette_drag.clone() else {
             return;
         };
         let Some(mouse) = ctx.input(|i| i.pointer.hover_pos()) else {
@@ -236,7 +236,7 @@ fn box_style(
     let lit = match item.kind {
         ItemKind::Source => item.on,
         ItemKind::Led => network.input(item.id, 0),
-        ItemKind::Gate(_) => false,
+        _ => false,
     };
     let base = if lit { LOGIC_ON_COLOR } else { item.color };
 

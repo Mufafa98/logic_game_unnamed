@@ -12,7 +12,7 @@ pub enum ItemKind {
     Source,
     Led,
     Gate(GateKind),
-    // TODO Compound(some subgraph id)
+    Compound(u64),
 }
 
 impl GateKind {
@@ -23,6 +23,7 @@ impl GateKind {
     }
 }
 
+#[derive(Clone)]
 pub struct LogicItem {
     pub id: u64,
     pub pos: Pos2,
@@ -58,13 +59,5 @@ impl LogicItem {
 
     pub fn is_source(&self) -> bool {
         matches!(self.kind, ItemKind::Source)
-    }
-
-    pub fn eval(&self, inputs: &[bool]) -> Vec<bool> {
-        match self.kind {
-            ItemKind::Source => vec![self.on],
-            ItemKind::Led => Vec::new(),
-            ItemKind::Gate(gate_kind) => gate_kind.eval(inputs),
-        }
     }
 }

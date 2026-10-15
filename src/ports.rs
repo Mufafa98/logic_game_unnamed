@@ -1,23 +1,24 @@
 use egui::{Color32, Pos2, Rect, Vec2};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     consts::{IN_PORT_COLOR, OUT_PORT_COLOR, PORT_HIT_SIZE},
     logic_item::LogicItem,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum PortKind {
     Input(u8),
     Output(u8),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct PortId {
     pub item_id: u64,
     pub kind: PortKind,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct Connection {
     pub from: PortId,
     pub to: PortId,
