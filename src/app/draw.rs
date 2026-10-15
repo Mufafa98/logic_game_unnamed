@@ -82,13 +82,29 @@ impl MyApp {
 
             painter.rect_filled(rect, 6.0 * camera.zoom, fill);
             painter.rect_stroke(rect, 6.0 * camera.zoom, stroke, StrokeKind::Inside);
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                &item.label,
-                FontId::proportional(20.0 * camera.zoom),
-                Color32::BLACK,
-            );
+
+            let font = egui::FontId::proportional(20.0 * camera.zoom);
+            let padding = 10.0 * camera.zoom;
+
+            let probe =
+                painter.layout_no_wrap(item.label.clone(), font.clone(), egui::Color32::BLACK);
+            let text_size = probe.size();
+            let fits_inside = text_size.x <= rect.width() - padding;
+
+            if fits_inside {
+                let pos = rect.center() - text_size * 0.5;
+                painter.galley(pos, probe, egui::Color32::BLACK);
+            } else {
+                let pos = egui::pos2(
+                    rect.center().x - text_size.x * 0.5,
+                    rect.max.y + 4.0 * camera.zoom,
+                );
+                let galley =
+                    painter.layout_no_wrap(item.label.clone(), font, egui::Color32::from_gray(220));
+                let bg = egui::Rect::from_min_size(pos, text_size).expand(4.0 * camera.zoom);
+                painter.rect_filled(bg, 4.0 * camera.zoom, egui::Color32::from_black_alpha(160));
+                painter.galley(pos, galley, egui::Color32::from_gray(220));
+            }
 
             if response.dragged() {
                 ctx.set_cursor_icon(CursorIcon::Grabbing);

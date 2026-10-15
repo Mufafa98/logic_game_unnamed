@@ -16,6 +16,7 @@ pub struct MyApp {
     pending: Option<PortId>,
     camera: Camera,
     palette_drag: Option<PaletteEntry>,
+    selected: Option<u64>,
 }
 
 impl Default for MyApp {
@@ -27,6 +28,7 @@ impl Default for MyApp {
             pending: None,
             camera: Camera::default(),
             palette_drag: None,
+            selected: None,
         };
         let blue = Color32::from_rgb(120, 170, 255);
         let purple = Color32::from_rgb(160, 130, 255);
@@ -210,14 +212,38 @@ impl App for MyApp {
             .order(Order::Foreground)
             .show(&ctx, |ui| {
                 ui.set_max_width(palette_w - 12.0);
+
                 for entry in PaletteEntry::all() {
                     if entry.draw(ui).drag_started() {
                         started_drag = Some(entry);
                     }
                     ui.add_space(6.0);
                 }
-            });
 
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                ui.label(RichText::new("Selected").strong());
+                ui.add_space(4.0);
+
+                match self
+                    .selected
+                    .and_then(|id| self.items.iter_mut().find(|it| it.id == id))
+                {
+                    Some(item) => {
+                        ui.label("Label");
+                        let resp = ui.text_edit_singleline(&mut item.label);
+
+                        if resp.lost_focus() {
+                            resp.request_focus();
+                        }
+                    }
+                    None => {
+                        ui.label(RichText::new("(click a block to edit)").weak());
+                    }
+                }
+            });
         if let Some(entry) = started_drag {
             self.palette_drag = Some(entry);
         }

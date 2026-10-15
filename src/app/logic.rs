@@ -33,7 +33,11 @@ impl MyApp {
             return;
         }
         for (item, response) in self.items.iter_mut().zip(responses) {
-            if response.clicked() && item.is_source() {
+            if !response.clicked() {
+                continue;
+            }
+            self.selected = Some(item.id);
+            if item.is_source() {
                 item.toggle();
             }
         }
