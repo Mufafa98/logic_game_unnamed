@@ -35,6 +35,10 @@ impl NandSimulation {
         }
         self.inputs[id] = !self.inputs[id]
     }
+
+    pub fn get_out(&self) -> &[Signal] {
+        &self.outputs
+    }
 }
 
 pub enum Command {
