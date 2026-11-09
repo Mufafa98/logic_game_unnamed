@@ -14,6 +14,15 @@ pub struct NandSimulation {
     outputs: [Signal; 1],
 }
 
+impl Default for NandSimulation {
+    fn default() -> Self {
+        Self {
+            inputs: [false, false],
+            outputs: [true],
+        }
+    }
+}
+
 impl NandSimulation {
     pub fn tick(&mut self) {
         self.outputs[0] = NandGate::eval(self.inputs[0], self.inputs[1])
