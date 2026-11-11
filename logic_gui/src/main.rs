@@ -1,5 +1,8 @@
 use bevy::{prelude::*, ui::Pressed};
-use logic_core::{CommandHistory, CommandPending, NandSimulation};
+use logic_core::{
+    NandSimulation,
+    command::{CommandHistory, CommandPending},
+};
 
 use crate::components::{LED_OFF, LED_ON, Led, LedId, Switch, SwitchState};
 
@@ -75,7 +78,10 @@ fn update_inputs(
             continue;
         }
         state.toggle();
-        pending.0.0.push(logic_core::Command::ToggleInput(id.0));
+        pending
+            .0
+            .0
+            .push(logic_core::command::Command::ToggleInput(id.0));
         *bg_color = if state.0 {
             BackgroundColor(LED_ON)
         } else {
