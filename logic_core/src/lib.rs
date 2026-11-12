@@ -1,4 +1,6 @@
+mod circuit;
 pub mod command;
+mod topo;
 
 type Signal = bool;
 type InputId = usize;
@@ -6,6 +8,8 @@ type InputId = usize;
 struct NandGate;
 
 impl NandGate {
+    pub const INPUT_COUNT: u8 = 2;
+    pub const OUTPUT_COUNT: u8 = 1;
     fn eval(a: Signal, b: Signal) -> Signal {
         !(a && b)
     }
@@ -41,4 +45,34 @@ impl NandSimulation {
     pub fn get_out(&self) -> &[Signal] {
         &self.outputs
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GateId(pub u64);
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct InputPinId {
+    pub gate: GateId,
+    pub index: u8,
+}
+
+pub struct OutputPinId {
+    pub gate: GateId,
+    pub index: u8,
+}
+
+pub struct Wire {
+    pub from: OutputPinId,
+    pub to: InputPinId,
+}
+
+pub enum WireError {
+    DuplicateDestination(InputPinId),
+}
+
+pub fn validate_wire(wire: &Wire, existing: &[Wire]) -> Result<(), WireError> {
+    if existing.iter().any(|w| w.to == wire.to) {
+        return Err(WireError::DuplicateDestination(wire.to));
+    }
+    Ok(())
 }
